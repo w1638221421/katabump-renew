@@ -7,17 +7,18 @@ import subprocess
 import requests
 from seleniumbase import SB
 
-# 从环境变量获取账号密码和钉钉配置
+# 从环境变量获取账号密码和 钉钉配置
 EMAIL        = os.environ.get("KATABUMP_EMAIL") or ""    # 登录邮箱
 PASSWORD     = os.environ.get("KATABUMP_PASSWORD") or "" # 账号密码
-DING_WEBHOOK = os.environ.get("DING_WEBHOOK") or ""      # 钉钉机器人webhook
+DD_BOT_TOKEN = os.environ.get("DD_BOT_TOKEN") or ""      # 钉钉机器人Token(可选)
+DD_SECRET    = os.environ.get("DD_SECRET") or ""         # 钉钉加签密钥(可选，如开启了加签则填写)
 
 BASE_URL = "https://dashboard.katabump.com"  # 网站链接
 
-# 钉钉推送模块（替换原来TG）
-def send_tg_message(status_icon, status_text, time_left=""):
-    if not DING_WEBHOOK:
-        print("ℹ️ 未配置 DING_WEBHOOK，跳过钉钉推送。")
+#  钉钉推送模块
+def send_dd_message(status_icon, status_text, time_left=""):
+    if not DD_BOT_TOKEN:
+        print("ℹ️  未配置 DD_BOT_TOKEN，跳过钉钉推送。")
         return
 
     # 获取北京时间 (UTC+8)
@@ -38,9 +39,23 @@ def send_tg_message(status_icon, status_text, time_left=""):
         f"🇫🇷 katabump 续期通知\n\n"
         f"{status_icon} {status_text}\n"
         f"👤 续期账户: {masked_email}\n"
-        f"⏱️ 续期时间: {current_time_str}\n"
-        f"📃详情：{time_left}"
+        f"⏱️ 续期时间: {current_time_str}"
     )
+
+    url = f"https://oapi.dingtalk.com/robot/send?access_token={DD_BOT_TOKEN}"
+    
+    # 处理加签
+    if DD_SECRET:
+        import hashlib
+        import hmac
+        from urllib.parse import quote_plus
+        timestamp = str(round(time.time() * 1000))
+        secret_enc = DD_SECRET.encode('utf-8')
+        string_to_sign = f'{timestamp}\n{DD_SECRET}'
+        string_to_sign_enc = string_to_sign.encode('utf-8')
+        hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
+        sign = quote_plus(hmac_code.hex())
+        url += f"&timestamp={timestamp}&sign={sign}"
 
     payload = {
         "msgtype": "text",
@@ -50,11 +65,12 @@ def send_tg_message(status_icon, status_text, time_left=""):
     }
     
     try:
-        r = requests.post(DING_WEBHOOK, json=payload, timeout=10)
-        if r.status_code == 200:
+        r = requests.post(url, json=payload, timeout=10)
+        result = r.json()
+        if result.get("errcode") == 0:
             print("📩 钉钉通知发送成功！")
         else:
-            print(f"⚠️ 钉钉通知发送失败: {r.text}")
+            print(f"⚠️ 钉钉通知发送失败: {result.get('errmsg', '未知错误')}")
     except Exception as e:
         print(f"⚠️ 钉钉通知发送异常: {e}")
 
@@ -355,7 +371,7 @@ def _goto_server_detail(sb) -> bool:
     alert_text = _read_alert(sb)
     if alert_text and "can't renew" in alert_text.lower():
         print(f"ℹ️  页面顶部提示: {alert_text}")
-        send_tg_message("ℹ️", "⚠️ 未到续期时间", alert_text)
+        send_dd_message("ℹ️", "⚠️ 未到续期时间", alert_text)
         return False
 
     # 多种选择器尝试查找 See 链接
@@ -447,32 +463,32 @@ def _open_renew_modal(sb) -> bool:
         return False
 
 
-# def _solve_altcha(sb) -> bool:
+# def _solve_altcha(sb):
 #     """处理 ALTCHA 人机验证"""
 #     print("\n🔐 处理 ALTCHA 人机验证...")
 #     time.sleep(2)
-#
+
 #     # 先检查是否已自动通过
 #     if sb.execute_script(_ALTCHA_SOLVED_JS):
 #         print("✅ ALTCHA 已自动通过")
 #         return True
-#
+
 #     # 展开模态框内 iframe 并获取坐标
 #     coords = None
 #     try:
 #         coords = sb.execute_script(_ALTCHA_EXPAND_JS)
 #     except Exception:
 #         pass
-#
+
 #     if coords:
 #         print(f"  📍 找到模态框内 iframe 坐标: ({coords['cx']}, {coords['cy']})")
-#
+
 #     # 最多尝试 3 轮
 #     for attempt in range(3):
 #         if sb.execute_script(_ALTCHA_SOLVED_JS):
 #             print(f"✅ ALTCHA 验证通过（第 {attempt + 1} 轮）")
 #             return True
-#
+
 #         # 策略 1: xdotool 物理点击 iframe 坐标
 #         if coords:
 #             try:
@@ -484,7 +500,7 @@ def _open_renew_modal(sb) -> bool:
 #             ay  = coords["cy"] + wi["sy"] + bar
 #             print(f"🖱️  ALTCHA点击复选框  ({ax}, {ay})")
 #             _xdotool_click(ax, ay)
-#
+
 #         # 策略 2: SeleniumBase 原生点击模态框内 iframe 元素
 #         try:
 #             iframes = sb.find_elements('div.modal.show iframe')
@@ -496,7 +512,7 @@ def _open_renew_modal(sb) -> bool:
 #                     pass
 #         except Exception:
 #             pass
-#
+
 #         # 策略 3: JS 遍历模态框内所有可点击元素
 #         sb.execute_script("""
 #             (function(){
@@ -525,14 +541,14 @@ def _open_renew_modal(sb) -> bool:
 #                 }
 #             })()
 #         """)
-#
+
 #         # 等待验证结果
 #         for _ in range(6):
 #             time.sleep(1)
 #             if sb.execute_script(_ALTCHA_SOLVED_JS):
 #                 print(f"✅ ALTCHA 验证通过（第 {attempt + 1} 轮）")
 #                 return True
-#
+
 #         print(f"  ⚠️ 第 {attempt + 1} 轮未通过，重试...")
 #         # 重新获取坐标（iframe 可能已重新渲染）
 #         try:
@@ -541,7 +557,7 @@ def _open_renew_modal(sb) -> bool:
 #                 coords = new_coords
 #         except Exception:
 #             pass
-#
+
 #     print("  ❌ ALTCHA 3 轮均失败")
 #     return False
 
@@ -577,14 +593,14 @@ def _check_renew_result(sb):
         print(f"📩 页面提示: {alert_text}")
         low = alert_text.lower()
         if "can't renew" in low or "unable" in low:
-            send_tg_message("⏳", "未到续期时间", alert_text)
+            send_dd_message("⏳", "未到续期时间", alert_text)
         elif any(kw in low for kw in ( "renewed", "success", "extended")):
-            send_tg_message("✅", "续期成功", alert_text)
+            send_dd_message("✅", "续期成功", alert_text)
         else:
-            send_tg_message("ℹ️", "续期操作已执行", alert_text)
+            send_dd_message("ℹ️", "续期操作已执行", alert_text)
     else:
         print("ℹ️ 未检测到明确的提示框，可能续期操作未生效")
-        send_tg_message("ℹ️", "续期操作已执行", "未检测到明确提示")
+        send_dd_message("ℹ️", "续期操作已执行", "未检测到明确提示")
 
 
 def renew_server(sb):
@@ -615,7 +631,7 @@ def main():
 
     IS_PROXY = os.environ.get("IS_PROXY", "false").lower() == "true"
     proxy_str = os.environ.get("PROXY_SERVER", "").strip() or "http://127.0.0.1:1081"
-    sb_kwargs = {"uc": True, "headless": True}
+    sb_kwargs = {"uc": True, "headless": False}
 
     if IS_PROXY:
         print(f"🔗 挂载代理: {proxy_str}")
@@ -636,7 +652,7 @@ def main():
             renew_server(sb)   # 登录成功后自动续期
         else:
             print("\n❌ 登录失败，终止后续续期操作。")
-            send_tg_message("❌", "登录失败", "未知")
+            send_dd_message("❌", "登录失败", "未知")
 
 if __name__ == "__main__":
     main()
