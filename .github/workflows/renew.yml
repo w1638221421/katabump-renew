@@ -2,7 +2,7 @@ name: Katabump Auto Renew
 
 on:
   schedule:
-  - cron: '30 22 */3 * *'  # 每天 UTC 22:30 (北京时间 6:30点) 运行,根据服务到期时间自行修改
+  - cron: '30 22 */3 * *'  # 每3天 UTC 22:30 (北京时间 6:30点) 运行,根据服务到期时间自行修改
   workflow_dispatch: # 允许手动触发
 
 jobs:
@@ -11,7 +11,7 @@ jobs:
     permissions:
       contents: write
       actions: write
-    
+
     steps:
     - uses: actions/checkout@v6
     - name: ⚙ 设置 Python
@@ -37,8 +37,9 @@ jobs:
       env:
         KATABUMP_EMAIL: ${{ secrets.KATABUMP_EMAIL }}
         KATABUMP_PASSWORD: ${{ secrets.KATABUMP_PASSWORD }}
-        TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-        TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        DING_WEBHOOK: ${{ secrets.DING_WEBHOOK }}
+        IS_PROXY: ${{ secrets.IS_PROXY }}
+        PROXY_SERVER: ${{ secrets.PROXY_SERVER }}
       run: |
         xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
           python3 app.py
