@@ -7,18 +7,17 @@ import subprocess
 import requests
 from seleniumbase import SB
 
-# 从环境变量获取账号密码和 TG 配置
+# 从环境变量获取账号密码和钉钉配置
 EMAIL        = os.environ.get("KATABUMP_EMAIL") or ""    # 登录邮箱
 PASSWORD     = os.environ.get("KATABUMP_PASSWORD") or "" # 账号密码
-TG_CHAT_ID   = os.environ.get("TG_CHAT_ID") or ""        # tg通知 chat id(可选)
-TG_BOT_TOKEN = os.environ.get("TG_BOT_TOKEN") or ""      # tg通知bot token(可选)
+DING_WEBHOOK = os.environ.get("DING_WEBHOOK") or ""      # 钉钉机器人webhook
 
 BASE_URL = "https://dashboard.katabump.com"  # 网站链接
 
-#  Telegram 推送模块
+# 钉钉推送模块（替换原来TG）
 def send_tg_message(status_icon, status_text, time_left=""):
-    if not TG_BOT_TOKEN or not TG_CHAT_ID:
-        print("ℹ️ 未配置 TG_BOT_TOKEN 或 TG_CHAT_ID，跳过 Telegram 推送。")
+    if not DING_WEBHOOK:
+        print("ℹ️ 未配置 DING_WEBHOOK，跳过钉钉推送。")
         return
 
     # 获取北京时间 (UTC+8)
@@ -39,23 +38,25 @@ def send_tg_message(status_icon, status_text, time_left=""):
         f"🇫🇷 katabump 续期通知\n\n"
         f"{status_icon} {status_text}\n"
         f"👤 续期账户: {masked_email}\n"
-        f"⏱️ 续期时间: {current_time_str}"
+        f"⏱️ 续期时间: {current_time_str}\n"
+        f"📃详情：{time_left}"
     )
 
-    url = f"https://api.telegram.org/bot{TG_BOT_TOKEN}/sendMessage"
     payload = {
-        "chat_id": TG_CHAT_ID,
-        "text": text
+        "msgtype": "text",
+        "text": {
+            "content": text
+        }
     }
     
     try:
-        r = requests.post(url, json=payload, timeout=10)
+        r = requests.post(DING_WEBHOOK, json=payload, timeout=10)
         if r.status_code == 200:
-            print("📩 Telegram 通知发送成功！")
+            print("📩 钉钉通知发送成功！")
         else:
-            print(f"⚠️ Telegram 通知发送失败: {r.text}")
+            print(f"⚠️ 钉钉通知发送失败: {r.text}")
     except Exception as e:
-        print(f"⚠️ Telegram 通知发送异常: {e}")
+        print(f"⚠️ 钉钉通知发送异常: {e}")
 
 #  页面注入脚本
 _EXPAND_JS = """
@@ -565,7 +566,7 @@ def _submit_renew(sb):
 
 
 def _check_renew_result(sb):
-    """读取页面 alert 提示，判断续期结果并推送 TG 通知"""
+    """读取页面 alert 提示，判断续期结果并推送钉钉通知"""
     print("\n📋 检查续期结果...")
     alert_text = _read_alert(sb)
     if not alert_text:
