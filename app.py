@@ -615,7 +615,7 @@ def main():
 
     IS_PROXY = os.environ.get("IS_PROXY", "false").lower() == "true"
     proxy_str = os.environ.get("PROXY_SERVER", "").strip() or "http://127.0.0.1:1081"
-    sb_kwargs = {"uc": True, "headless": False}
+    sb_kwargs = {"uc": True, "headless": True}
 
     if IS_PROXY:
         print(f"🔗 挂载代理: {proxy_str}")
