@@ -7,72 +7,176 @@ import subprocess
 import requests
 from seleniumbase import SB
 
-# 从环境变量获取账号密码和 钉钉配置
+# 从环境变量获取账号密码和 企业微信 配置
 EMAIL        = os.environ.get("KATABUMP_EMAIL") or ""    # 登录邮箱
 PASSWORD     = os.environ.get("KATABUMP_PASSWORD") or "" # 账号密码
-DD_BOT_TOKEN = os.environ.get("DD_BOT_TOKEN") or ""      # 钉钉机器人Token(可选)
-DD_SECRET    = os.environ.get("DD_SECRET") or ""         # 钉钉加签密钥(可选，如开启了加签则填写)
+
+# ===== 企业微信通知配置（两种方式任选其一）=====
+# 方式一（推荐）：群机器人 Webhook，填完整地址或只填 key
+WECOM_WEBHOOK   = (os.environ.get("WECOM_WEBHOOK") or "").strip()
+WECOM_KEY       = (os.environ.get("WECOM_KEY") or "").strip()
+
+# 方式二：自建应用消息推送（需企业微信管理后台创建应用）
+WECOM_CORPID    = (os.environ.get("WECOM_CORPID") or "").strip()
+WECOM_CORPSECRET= (os.environ.get("WECOM_CORPSECRET") or "").strip()
+WECOM_AGENTID   = (os.environ.get("WECOM_AGENTID") or "").strip()
+WECOM_TOUSER    = (os.environ.get("WECOM_TOUSER") or "@all").strip()  # 成员账号，多个用 | 分隔
+
+# 群机器人 @ 手机号（可选，多个用英文逗号分隔）
+WECOM_MENTION_MOBILE = (os.environ.get("WECOM_MENTION_MOBILE") or "").strip()
 
 BASE_URL = "https://dashboard.katabump.com"  # 网站链接
+WECOM_API = "https://qyapi.weixin.qq.com/cgi-bin"
 
-#  钉钉推送模块
-def send_dd_message(status_icon, status_text, time_left=""):
-    if not DD_BOT_TOKEN:
-        print("ℹ️  未配置 DD_BOT_TOKEN，跳过钉钉推送。")
-        return
-
-    # 获取北京时间 (UTC+8)
-    local_time = time.gmtime(time.time() + 8 * 3600)
-    current_time_str = time.strftime("%Y-%m-%d %H:%M:%S", local_time)
-
-    # 邮箱脱敏：保留用户名前2位和后2位，中间用****代替
+#  企业微信推送模块
+def _masked_email() -> str:
+    """邮箱脱敏：保留用户名前2位和后2位，中间用****代替"""
     if '@' in EMAIL:
         name, domain = EMAIL.split('@', 1)
         if len(name) > 4:
-            masked_email = f"{name[:2]}****{name[-2:]}@{domain}"
-        else:
-            masked_email = f"{name}@{domain}"
-    else:
-        masked_email = EMAIL[:2] + '****'
+            return f"{name[:2]}****{name[-2:]}@{domain}"
+        return f"{name}@{domain}"
+    return EMAIL[:2] + '****' if EMAIL else '****'
 
-    text = (
-        f"🇫🇷 katabump 续期通知\n\n"
+
+def _wecom_webhook_url() -> str:
+    """兼容三种写法：完整 webhook 地址 / 仅 key / 老式 ?key=xxx"""
+    raw = WECOM_WEBHOOK or WECOM_KEY
+    if not raw:
+        return ""
+    if raw.startswith("http"):
+        return raw
+    # 只填了 key 的情况
+    return f"{WECOM_API}/webhook/send?key={raw}"
+
+
+def _status_color(status_icon: str) -> str:
+    if status_icon in ("✅",):
+        return "info"
+    if status_icon in ("⚠️", "⏳", "🔔"):
+        return "warning"
+    return "comment"
+
+
+def _truncate_bytes(text: str, limit: int) -> str:
+    """按字节截断，避免超出企业微信 4096 字节的消息上限"""
+    raw = text.encode("utf-8")
+    if len(raw) <= limit:
+        return text
+    return raw[:limit].decode("utf-8", "ignore") + "..."
+
+
+def _build_wecom_markdown(status_icon, status_text, detail=""):
+    """构造企业微信 markdown 消息体，返回 (markdown文本, 纯文本版)"""
+    local_time = time.gmtime(time.time() + 8 * 3600)
+    current_time_str = time.strftime("%Y-%m-%d %H:%M:%S", local_time)
+    masked_email = _masked_email()
+    color = _status_color(status_icon)
+    detail = _truncate_bytes((detail or "").strip(), 600)
+
+    md = (
+        f"## 🇫🇷 katabump 续期通知\n"
+        f"> 状态：<font color=\"{color}\">{status_icon} {status_text}</font>\n"
+        f"**👤 续期账户：** {masked_email}\n"
+        f"**⏱️ 续期时间：** {current_time_str}"
+    )
+    if detail:
+        md += f"\n**📋 详情：** {detail}"
+
+    plain = (
+        f"katabump 续期通知\n"
         f"{status_icon} {status_text}\n"
         f"👤 续期账户: {masked_email}\n"
         f"⏱️ 续期时间: {current_time_str}"
     )
+    if detail:
+        plain += f"\n📋 详情: {detail}"
+    return md, plain
 
-    url = f"https://oapi.dingtalk.com/robot/send?access_token={DD_BOT_TOKEN}"
-    
-    # 处理加签
-    if DD_SECRET:
-        import hashlib
-        import hmac
-        from urllib.parse import quote_plus
-        timestamp = str(round(time.time() * 1000))
-        secret_enc = DD_SECRET.encode('utf-8')
-        string_to_sign = f'{timestamp}\n{DD_SECRET}'
-        string_to_sign_enc = string_to_sign.encode('utf-8')
-        hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
-        sign = quote_plus(hmac_code.hex())
-        url += f"&timestamp={timestamp}&sign={sign}"
 
-    payload = {
-        "msgtype": "text",
-        "text": {
-            "content": text
+def _wecom_get_token() -> str:
+    """获取自建应用 access_token（有效期 7200s，进程内缓存）"""
+    now = time.time()
+    cached = getattr(_wecom_get_token, "_cache", None)
+    if cached and cached[1] > now:
+        return cached[0]
+    r = requests.get(
+        f"{WECOM_API}/gettoken",
+        params={"corpid": WECOM_CORPID, "corpsecret": WECOM_CORPSECRET},
+        timeout=10,
+    )
+    data = r.json()
+    if data.get("errcode") != 0:
+        raise RuntimeError(f"gettoken 失败: {data}")
+    token = data["access_token"]
+    _wecom_get_token._cache = (token, now + int(data.get("expires_in", 7200)) - 300)
+    return token
+
+
+def _send_by_webhook(md_text: str, plain_text: str):
+    url = _wecom_webhook_url()
+    mentions = [m.strip() for m in WECOM_MENTION_MOBILE.split(",") if m.strip()]
+    if mentions:
+        # 群机器人的 markdown 消息不支持 @ 成员，需要 @ 时改用 text 消息
+        payload = {
+            "msgtype": "text",
+            "text": {"content": plain_text, "mentioned_mobile_list": mentions},
         }
-    }
-    
+    else:
+        payload = {"msgtype": "markdown", "markdown": {"content": md_text}}
+
+    r = requests.post(url, json=payload, timeout=10)
     try:
-        r = requests.post(url, json=payload, timeout=10)
-        result = r.json()
-        if result.get("errcode") == 0:
-            print("📩 钉钉通知发送成功！")
-        else:
-            print(f"⚠️ 钉钉通知发送失败: {result.get('errmsg', '未知错误')}")
+        data = r.json() if r.text else {}
+    except ValueError:
+        data = {}
+    if data.get("errcode") == 0:
+        print("📩 企业微信（群机器人）通知发送成功！")
+        return True
+    print(f"⚠️ 企业微信（群机器人）通知发送失败: {data or r.text[:200]}")
+    return False
+
+
+def _send_by_app(md_text: str):
+    if not WECOM_AGENTID.isdigit():
+        print(f"⚠️ WECOM_AGENTID 必须是数字，当前值: {WECOM_AGENTID!r}")
+        return False
+    token = _wecom_get_token()
+    payload = {
+        "touser": WECOM_TOUSER or "@all",
+        "msgtype": "markdown",
+        "agentid": int(WECOM_AGENTID),
+        "markdown": {"content": md_text},
+        "safe": 0,
+        "duplicate_check_interval": 1800,
+    }
+    r = requests.post(f"{WECOM_API}/message/send", params={"access_token": token}, json=payload, timeout=10)
+    try:
+        data = r.json()
+    except ValueError:
+        data = {"errcode": -1, "errmsg": r.text[:200]}
+    if data.get("errcode") == 0:
+        print("📩 企业微信（应用消息）通知发送成功！")
+        return True
+    print(f"⚠️ 企业微信（应用消息）通知发送失败: {data}")
+    return False
+
+
+def send_wecom_message(status_icon, status_text, detail=""):
+    """发送企业微信通知：优先群机器人 webhook，其次自建应用消息"""
+    if not _wecom_webhook_url() and not (WECOM_CORPID and WECOM_CORPSECRET and WECOM_AGENTID):
+        print("ℹ️ 未配置 WECOM_WEBHOOK（或 WECOM_KEY / 应用三件套），跳过企业微信推送。")
+        return False
+
+    md_text, plain_text = _build_wecom_markdown(status_icon, status_text, detail)
+    try:
+        if _wecom_webhook_url():
+            return _send_by_webhook(md_text, plain_text)
+        return _send_by_app(md_text)
     except Exception as e:
-        print(f"⚠️ 钉钉通知发送异常: {e}")
+        print(f"⚠️ 企业微信通知发送异常: {e}")
+        return False
+
 
 #  页面注入脚本
 _EXPAND_JS = """
@@ -371,7 +475,7 @@ def _goto_server_detail(sb) -> bool:
     alert_text = _read_alert(sb)
     if alert_text and "can't renew" in alert_text.lower():
         print(f"ℹ️  页面顶部提示: {alert_text}")
-        send_dd_message("ℹ️", "⚠️ 未到续期时间", alert_text)
+        send_wecom_message("ℹ️", "⚠️ 未到续期时间", alert_text)
         return False
 
     # 多种选择器尝试查找 See 链接
@@ -463,32 +567,32 @@ def _open_renew_modal(sb) -> bool:
         return False
 
 
-# def _solve_altcha(sb):
+# def _solve_altcha(sb) -> bool:
 #     """处理 ALTCHA 人机验证"""
 #     print("\n🔐 处理 ALTCHA 人机验证...")
 #     time.sleep(2)
-
+#
 #     # 先检查是否已自动通过
 #     if sb.execute_script(_ALTCHA_SOLVED_JS):
 #         print("✅ ALTCHA 已自动通过")
 #         return True
-
+#
 #     # 展开模态框内 iframe 并获取坐标
 #     coords = None
 #     try:
 #         coords = sb.execute_script(_ALTCHA_EXPAND_JS)
 #     except Exception:
 #         pass
-
+#
 #     if coords:
 #         print(f"  📍 找到模态框内 iframe 坐标: ({coords['cx']}, {coords['cy']})")
-
+#
 #     # 最多尝试 3 轮
 #     for attempt in range(3):
 #         if sb.execute_script(_ALTCHA_SOLVED_JS):
 #             print(f"✅ ALTCHA 验证通过（第 {attempt + 1} 轮）")
 #             return True
-
+#
 #         # 策略 1: xdotool 物理点击 iframe 坐标
 #         if coords:
 #             try:
@@ -500,7 +604,7 @@ def _open_renew_modal(sb) -> bool:
 #             ay  = coords["cy"] + wi["sy"] + bar
 #             print(f"🖱️  ALTCHA点击复选框  ({ax}, {ay})")
 #             _xdotool_click(ax, ay)
-
+#
 #         # 策略 2: SeleniumBase 原生点击模态框内 iframe 元素
 #         try:
 #             iframes = sb.find_elements('div.modal.show iframe')
@@ -512,7 +616,7 @@ def _open_renew_modal(sb) -> bool:
 #                     pass
 #         except Exception:
 #             pass
-
+#
 #         # 策略 3: JS 遍历模态框内所有可点击元素
 #         sb.execute_script("""
 #             (function(){
@@ -541,14 +645,14 @@ def _open_renew_modal(sb) -> bool:
 #                 }
 #             })()
 #         """)
-
+#
 #         # 等待验证结果
 #         for _ in range(6):
 #             time.sleep(1)
 #             if sb.execute_script(_ALTCHA_SOLVED_JS):
 #                 print(f"✅ ALTCHA 验证通过（第 {attempt + 1} 轮）")
 #                 return True
-
+#
 #         print(f"  ⚠️ 第 {attempt + 1} 轮未通过，重试...")
 #         # 重新获取坐标（iframe 可能已重新渲染）
 #         try:
@@ -557,7 +661,7 @@ def _open_renew_modal(sb) -> bool:
 #                 coords = new_coords
 #         except Exception:
 #             pass
-
+#
 #     print("  ❌ ALTCHA 3 轮均失败")
 #     return False
 
@@ -582,7 +686,7 @@ def _submit_renew(sb):
 
 
 def _check_renew_result(sb):
-    """读取页面 alert 提示，判断续期结果并推送钉钉通知"""
+    """读取页面 alert 提示，判断续期结果并推送企业微信通知"""
     print("\n📋 检查续期结果...")
     alert_text = _read_alert(sb)
     if not alert_text:
@@ -593,14 +697,14 @@ def _check_renew_result(sb):
         print(f"📩 页面提示: {alert_text}")
         low = alert_text.lower()
         if "can't renew" in low or "unable" in low:
-            send_dd_message("⏳", "未到续期时间", alert_text)
+            send_wecom_message("⏳", "未到续期时间", alert_text)
         elif any(kw in low for kw in ( "renewed", "success", "extended")):
-            send_dd_message("✅", "续期成功", alert_text)
+            send_wecom_message("✅", "续期成功", alert_text)
         else:
-            send_dd_message("ℹ️", "续期操作已执行", alert_text)
+            send_wecom_message("ℹ️", "续期操作已执行", alert_text)
     else:
         print("ℹ️ 未检测到明确的提示框，可能续期操作未生效")
-        send_dd_message("ℹ️", "续期操作已执行", "未检测到明确提示")
+        send_wecom_message("ℹ️", "续期操作已执行", "未检测到明确提示")
 
 
 def renew_server(sb):
@@ -652,7 +756,18 @@ def main():
             renew_server(sb)   # 登录成功后自动续期
         else:
             print("\n❌ 登录失败，终止后续续期操作。")
-            send_dd_message("❌", "登录失败", "未知")
+            send_wecom_message("❌", "登录失败", "未知")
+
+def test_notify():
+    """只发一条测试通知，用来验证企业微信配置是否正确：python3 app.py --test-notify"""
+    print("🧪 发送企业微信测试通知...")
+    ok = send_wecom_message("✅", "测试通知", "这是一条来自 katabump-renew 的测试消息")
+    print("✅ 测试通知已发送" if ok else "❌ 测试通知发送失败，请检查环境变量配置")
+    return 0 if ok else 1
+
 
 if __name__ == "__main__":
+    import sys
+    if "--test-notify" in sys.argv:
+        sys.exit(test_notify())
     main()
