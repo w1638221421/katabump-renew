@@ -37,8 +37,14 @@ jobs:
       env:
         KATABUMP_EMAIL: ${{ secrets.KATABUMP_EMAIL }}
         KATABUMP_PASSWORD: ${{ secrets.KATABUMP_PASSWORD }}
-        DD_BOT_TOKEN: ${{ secrets.DD_BOT_TOKEN }}
-        DD_SECRET: ${{ secrets.DD_SECRET }}
+        # ===== 企业微信通知（两种方式任选其一）=====
+        WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}          # 群机器人完整 webhook 地址
+        WECOM_KEY: ${{ secrets.WECOM_KEY }}                  # 或者只填 webhook 的 key
+        WECOM_MENTION_MOBILE: ${{ secrets.WECOM_MENTION_MOBILE }}  # 可选：@ 手机号，逗号分隔
+        WECOM_CORPID: ${{ secrets.WECOM_CORPID }}            # 可选：自建应用 corpid
+        WECOM_CORPSECRET: ${{ secrets.WECOM_CORPSECRET }}    # 可选：自建应用 secret
+        WECOM_AGENTID: ${{ secrets.WECOM_AGENTID }}          # 可选：自建应用 agentid
+        WECOM_TOUSER: ${{ secrets.WECOM_TOUSER }}            # 可选：接收人，默认 @all
       run: |
         xvfb-run --auto-servernum --server-args="-screen 0 1920x1080x24" \
           python3 app.py
