@@ -50,48 +50,29 @@ def _wecom_webhook_url() -> str:
     return f"{WECOM_API}/webhook/send?key={raw}"
 
 
-def _status_color(status_icon: str) -> str:
-    if status_icon in ("✅",):
-        return "info"
-    if status_icon in ("⚠️", "⏳", "🔔"):
-        return "warning"
-    return "comment"
-
-
 def _truncate_bytes(text: str, limit: int) -> str:
-    """按字节截断，避免超出企业微信 4096 字节的消息上限"""
+    """按字节截断，避免超出企业微信 text 消息 2048 字节的上限"""
     raw = text.encode("utf-8")
     if len(raw) <= limit:
         return text
     return raw[:limit].decode("utf-8", "ignore") + "..."
 
 
-def _build_wecom_markdown(status_icon, status_text, detail=""):
-    """构造企业微信 markdown 消息体，返回 (markdown文本, 纯文本版)"""
+def _build_wecom_text(status_icon, status_text, detail=""):
+    """构造企业微信纯文本消息（msgtype=text，上限 2048 字节）"""
     local_time = time.gmtime(time.time() + 8 * 3600)
     current_time_str = time.strftime("%Y-%m-%d %H:%M:%S", local_time)
-    masked_email = _masked_email()
-    color = _status_color(status_icon)
     detail = _truncate_bytes((detail or "").strip(), 600)
 
-    md = (
-        f"## 🇫🇷 katabump 续期通知\n"
-        f"> 状态：<font color=\"{color}\">{status_icon} {status_text}</font>\n"
-        f"**👤 续期账户：** {masked_email}\n"
-        f"**⏱️ 续期时间：** {current_time_str}"
-    )
-    if detail:
-        md += f"\n**📋 详情：** {detail}"
-
-    plain = (
-        f"katabump 续期通知\n"
+    text = (
+        f"🇫🇷 katabump 续期通知\n"
         f"{status_icon} {status_text}\n"
-        f"👤 续期账户: {masked_email}\n"
+        f"👤 续期账户: {_masked_email()}\n"
         f"⏱️ 续期时间: {current_time_str}"
     )
     if detail:
-        plain += f"\n📋 详情: {detail}"
-    return md, plain
+        text += f"\n📋 详情: {detail}"
+    return text
 
 
 def _wecom_get_token() -> str:
@@ -113,17 +94,12 @@ def _wecom_get_token() -> str:
     return token
 
 
-def _send_by_webhook(md_text: str, plain_text: str):
+def _send_by_webhook(text: str):
     url = _wecom_webhook_url()
+    payload = {"msgtype": "text", "text": {"content": text}}
     mentions = [m.strip() for m in WECOM_MENTION_MOBILE.split(",") if m.strip()]
     if mentions:
-        # 群机器人的 markdown 消息不支持 @ 成员，需要 @ 时改用 text 消息
-        payload = {
-            "msgtype": "text",
-            "text": {"content": plain_text, "mentioned_mobile_list": mentions},
-        }
-    else:
-        payload = {"msgtype": "markdown", "markdown": {"content": md_text}}
+        payload["text"]["mentioned_mobile_list"] = mentions
 
     r = requests.post(url, json=payload, timeout=10)
     try:
@@ -137,16 +113,16 @@ def _send_by_webhook(md_text: str, plain_text: str):
     return False
 
 
-def _send_by_app(md_text: str):
+def _send_by_app(text: str):
     if not WECOM_AGENTID.isdigit():
         print(f"⚠️ WECOM_AGENTID 必须是数字，当前值: {WECOM_AGENTID!r}")
         return False
     token = _wecom_get_token()
     payload = {
         "touser": WECOM_TOUSER or "@all",
-        "msgtype": "markdown",
+        "msgtype": "text",
         "agentid": int(WECOM_AGENTID),
-        "markdown": {"content": md_text},
+        "text": {"content": text},
         "safe": 0,
         "duplicate_check_interval": 1800,
     }
@@ -168,11 +144,11 @@ def send_wecom_message(status_icon, status_text, detail=""):
         print("ℹ️ 未配置 WECOM_WEBHOOK（或 WECOM_KEY / 应用三件套），跳过企业微信推送。")
         return False
 
-    md_text, plain_text = _build_wecom_markdown(status_icon, status_text, detail)
+    text = _build_wecom_text(status_icon, status_text, detail)
     try:
         if _wecom_webhook_url():
-            return _send_by_webhook(md_text, plain_text)
-        return _send_by_app(md_text)
+            return _send_by_webhook(text)
+        return _send_by_app(text)
     except Exception as e:
         print(f"⚠️ 企业微信通知发送异常: {e}")
         return False
