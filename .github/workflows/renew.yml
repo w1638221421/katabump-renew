@@ -1,39 +1,39 @@
-name: Katabump Auto Renew
+名称: Katabump自动更新
 
-on:
-  schedule:
-  - cron: '30 22 */3 * *'  # 每天 UTC 22:30 (北京时间 6:30点) 运行,根据服务到期时间自行修改
-  workflow_dispatch: # 允许手动触发
+对:
+  附表:
+  - cron: '30 19 */3 * *'  # 每天 UTC 22:30 (北京时间 6:30点) 运行,根据服务到期时间自行修改
+  工作流调度: # 允许手动触发
 
-jobs:
+工作:
   Renew-Katabump:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: write
+    接续的: 乌班图最新
+    权限:
+      内容: 写
+      行动: 写
     
-    steps:
-    - uses: actions/checkout@v6
-    - name: ⚙ 设置 Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: '3.12'
+    步骤:
+    - 使用: 操作/签出@v6
+    - 名称: 请选择两种不同的语言
+      使用: 操作/设置-python@v6
+      与:
+        蟒蛇型: '3.12'
 
-    - name: 🛠️ 安装系统依赖和python依赖
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y xvfb x11-utils xdotool scrot fonts-noto-cjk
-        pip install seleniumbase requests
-        seleniumbase install chromedriver
+    - 名称: 🛠️ 安装系统依赖和python依赖
+      运行: |
+        sudo apt-get更新
+        sudo apt-get安装-y xvfb x11-实用程序xdotool scrot字体-通知-cjk
+        pip安装seleniumbase请求
+        基于硒安装铬驱动程序
 
-    - name: ⚙ 设置代理 (sing-box)
-      continue-on-error: true
+    - 名称: 请选择两种不同的语言
+      出错时继续: 真
       env:
-        NODE_LINK: ${{ secrets.NODE_LINK }}
-      run: |
-        bash <(wget -qO- https://main.ssss.nyc.mn/setup_proxy.sh)
+        NODE_LINK: ${{ NODE_LINK： }}
+      运行: |
+        我的天啊，我的天啊！
 
-    - name: 🚀 运行续期脚本
+    - 名称: 🚀 运行续期脚本
       env:
         KATABUMP_EMAIL: ${{ secrets.KATABUMP_EMAIL }}
         KATABUMP_PASSWORD: ${{ secrets.KATABUMP_PASSWORD }}
